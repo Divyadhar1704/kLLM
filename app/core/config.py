@@ -7,6 +7,7 @@ to start with insecure defaults.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Any, Literal
 from urllib.parse import quote_plus
 
@@ -86,7 +87,13 @@ class Settings(BaseSettings):
     gcp_project_id: str | None = None
     gcp_region: str = "asia-south1"
     gcs_bucket: str | None = None
-    gcs_signed_url_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
+
+    # --- Media storage (cleaned photos / video frames of chat questions) ---
+    # none: nothing stored. local: development folder (refused when deployed). gcs: GCS_BUCKET.
+    media_storage: Literal["none", "local", "gcs"] = "none"
+    media_local_dir: Path = Path(".media")
+    media_retention_days: int = Field(default=180, ge=1, le=3650)
+    media_url_ttl_seconds: int = Field(default=900, ge=60, le=86400)  # signed download links
 
     # --- LLM ---
     llm_provider: LLMProvider = "gemini"
@@ -155,9 +162,25 @@ class Settings(BaseSettings):
     video_candidate_frames: int = Field(default=16, ge=4, le=60)  # frames quality-checked
     video_max_concurrent: int = Field(default=2, ge=1, le=16)  # decodes at once per instance
 
-    # --- Rate limiting ---
-    rate_limit_per_minute: int = Field(default=30, ge=1)
-    rate_limit_per_day: int = Field(default=500, ge=1)
+    # --- Authentication ---
+    # Required in staging/production (validated). Off locally so /dev and the evals work.
+    auth_required: bool = False
+    # User tokens (Authorization: Bearer) signed by the Krishindra backend: either a shared
+    # HS256 secret or a JWKS URL with its public keys (RS256/ES256). Claim `sub` = user id.
+    auth_jwt_secret: SecretStr | None = None
+    auth_jwt_jwks_url: str | None = None
+    auth_jwt_issuer: str | None = None
+    auth_jwt_audience: str = "krishimitra-api"
+    auth_jwt_max_lifetime_seconds: int = Field(default=24 * 3600, ge=60)  # longer tokens refused
+    auth_jwt_client_id: str = Field(default="krishindra-app", pattern=r"^[a-z0-9-]{1,40}$")
+    api_key_cache_seconds: int = Field(default=60, ge=0, le=3600)  # revocation delay
+
+    # --- Rate limiting (fixed windows; memory = per instance, redis = shared) ---
+    rate_limit_backend: Literal["memory", "redis"] = "memory"
+    rate_limit_per_minute: int = Field(default=30, ge=1)  # AI requests per user
+    rate_limit_per_day: int = Field(default=500, ge=1)  # AI requests per user
+    rate_limit_client_per_minute: int = Field(default=600, ge=1)  # AI requests per client app
+    rate_limit_feedback_per_minute: int = Field(default=60, ge=1)  # per user
 
     # ------------------------------------------------------------------ validators
 
@@ -199,6 +222,14 @@ class Settings(BaseSettings):
     def _validate_consistency(self) -> Settings:
         if self.llm_fallback_provider is not None and not self.llm_fallback_model:
             raise ValueError("LLM_FALLBACK_MODEL is required when LLM_FALLBACK_PROVIDER is set")
+        if self.media_storage == "gcs" and not self.gcs_bucket:
+            raise ValueError("GCS_BUCKET is required when MEDIA_STORAGE=gcs")
+        if self.auth_jwt_secret is not None and self.auth_jwt_jwks_url:
+            raise ValueError("Set AUTH_JWT_SECRET or AUTH_JWT_JWKS_URL, not both")
+        if self.auth_jwt_secret is not None and len(self.auth_jwt_secret.get_secret_value()) < 32:
+            raise ValueError("AUTH_JWT_SECRET must be at least 32 characters")
+        if self.auth_jwt_jwks_url and not self.auth_jwt_jwks_url.startswith("https://"):
+            raise ValueError("AUTH_JWT_JWKS_URL must use https")
 
         if self.is_deployed:
             problems = self._deployment_problems()
@@ -216,6 +247,10 @@ class Settings(BaseSettings):
             problems.append("GCP_PROJECT_ID is required")
         if not self.gcs_bucket:
             problems.append("GCS_BUCKET is required")
+        if self.media_storage == "local":
+            problems.append("MEDIA_STORAGE=local is for development only (use gcs or none)")
+        if not self.auth_required:
+            problems.append("AUTH_REQUIRED must be true")
         if not self.log_json:
             problems.append("LOG_JSON must be true")
         if self.app_env == "production":

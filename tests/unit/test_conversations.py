@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
@@ -32,15 +33,22 @@ class FakeStore:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.turns: dict[str, list[ChatTurn]] = {}
+        self.owners: dict[str, str] = {}
         self.saved: list[dict[str, Any]] = []
         self.feedback: list[dict[str, Any]] = []
 
-    async def history(self, conversation_id: str) -> tuple[ChatTurn, ...]:
+    async def check_owner(self, conversation_id: str, *, owner: str) -> None:
+        if self.owners.get(conversation_id, owner) != owner:
+            raise NotFoundError("Unknown conversation_id.")
+
+    async def history(self, conversation_id: str, *, owner: str) -> tuple[ChatTurn, ...]:
+        await self.check_owner(conversation_id, owner=owner)
         return tuple(self.turns.get(conversation_id, [])[-6:])
 
     async def save_turn(self, **kwargs: Any) -> str | None:
         if self.fail:
             return None
+        self.owners.setdefault(kwargs["conversation_id"], kwargs["owner"])
         self.saved.append(kwargs)
         self.turns.setdefault(kwargs["conversation_id"], []).extend(
             [ChatTurn("user", kwargs["question"]), ChatTurn("model", kwargs["answer"])]
@@ -50,8 +58,10 @@ class FakeStore:
         return message_id
 
     async def save_feedback(self, **kwargs: Any) -> str:
-        known = {s["message_id"] for s in self.saved}
-        if kwargs["message_id"] is not None and kwargs["message_id"] not in known:
+        # Same rule as ConversationStore: other owners' answers look unknown.
+        owners = {s["message_id"]: s["owner"] for s in self.saved}
+        message_id = kwargs["message_id"]
+        if message_id is not None and owners.get(message_id) != kwargs["owner"]:
             raise NotFoundError("Unknown message_id.")
         self.feedback.append(kwargs)
         return uuid.uuid4().hex
@@ -213,16 +223,23 @@ def test_feedback_errors() -> None:
 
 
 class FakeSession:
-    def __init__(self, rows: list[Any] | None = None, *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        rows: list[Any] | None = None,
+        *,
+        fail: bool = False,
+        conversation: Any = None,
+    ) -> None:
         self.rows = rows or []
         self.fail = fail
+        self.conversation = conversation  # what session.get(Conversation, ...) returns
         self.added: list[Any] = []
 
     async def execute(self, statement: Any) -> list[Any]:
         return self.rows
 
     async def get(self, model: Any, key: str) -> Any:
-        return None
+        return self.conversation
 
     def add(self, item: Any) -> None:
         if self.fail:
@@ -255,26 +272,62 @@ async def test_store_history_turns() -> None:
         row("user", "second question"),
         row("assistant", "first answer"),  # oldest kept row is an answer: dropped
     ]
-    store = ConversationStore(FakeDatabase(FakeSession(newest_first)))  # type: ignore[arg-type]
-    turns = await store.history(CONV)
+    session = FakeSession(newest_first, conversation=owned_by("app:u1"))
+    store = ConversationStore(FakeDatabase(session))  # type: ignore[arg-type]
+    turns = await store.history(CONV, owner="app:u1")
     assert [t.role for t in turns] == ["user", "model"]
     assert turns[0].text == "second question"
     assert len(turns[1].text) == MAX_TURN_CHARS + 1 and turns[1].text.endswith("…")
 
 
+def owned_by(owner: str | None) -> SimpleNamespace:
+    return SimpleNamespace(owner_id=owner, language="en", last_message_at=None)
+
+
+async def test_store_hides_other_owners_conversations() -> None:
+    session = FakeSession([row("user", "private question")], conversation=owned_by("app:u1"))
+    store = ConversationStore(FakeDatabase(session))  # type: ignore[arg-type]
+    with pytest.raises(NotFoundError, match="Unknown conversation_id"):
+        await store.history(CONV, owner="app:u2")
+    with pytest.raises(NotFoundError):
+        await store.check_owner(CONV, owner="app:u2")
+    await store.check_owner(CONV, owner="app:u1")  # the owner: fine
+    assert (
+        await store.save_turn(
+            conversation_id=CONV,
+            owner="app:u2",
+            language="en",
+            question="q",
+            answer="a",
+            sources=[],
+        )
+        is None
+    )
+    assert session.added == []  # nothing appended to someone else's conversation
+
+
+async def test_store_legacy_conversations_belong_to_anonymous() -> None:
+    session = FakeSession([row("user", "old")], conversation=owned_by(None))
+    store = ConversationStore(FakeDatabase(session))  # type: ignore[arg-type]
+    assert len(await store.history(CONV, owner="anonymous")) == 1
+    with pytest.raises(NotFoundError):
+        await store.history(CONV, owner="app:u1")
+
+
 async def test_store_history_failure_returns_no_history() -> None:
     db = FakeDatabase(FakeSession(), read_error=ConnectionError("down"))
-    assert await ConversationStore(db).history(CONV) == ()  # type: ignore[arg-type]
+    assert await ConversationStore(db).history(CONV, owner="app:u1") == ()  # type: ignore[arg-type]
 
 
 async def test_store_save_turn_orders_question_before_answer() -> None:
     session = FakeSession()
     store = ConversationStore(FakeDatabase(session))  # type: ignore[arg-type]
     message_id = await store.save_turn(
-        conversation_id=CONV, language="te", question="q", answer="a", sources=[]
+        conversation_id=CONV, owner="app:u1", language="te", question="q", answer="a", sources=[]
     )
     conversation, question, answer = session.added
     assert conversation.id == CONV and conversation.language == "te"
+    assert conversation.owner_id == "app:u1"
     assert isinstance(question, ConversationMessage) and question.role == "user"
     assert answer.role == "assistant" and answer.id == message_id
     assert answer.created_at > question.created_at  # same transaction: order set explicitly
@@ -283,7 +336,7 @@ async def test_store_save_turn_orders_question_before_answer() -> None:
 async def test_store_save_turn_failure_returns_none() -> None:
     store = ConversationStore(FakeDatabase(FakeSession(fail=True)))  # type: ignore[arg-type]
     result = await store.save_turn(
-        conversation_id=CONV, language="en", question="q", answer="a", sources=[]
+        conversation_id=CONV, owner="app:u1", language="en", question="q", answer="a", sources=[]
     )
     assert result is None
 

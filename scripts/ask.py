@@ -17,6 +17,8 @@ import time
 
 import httpx
 
+from scripts.api_auth import api_headers
+
 DEMO_QUESTIONS: list[tuple[str | None, str]] = [
     (None, "What are the symptoms of early blight in tomato?"),
     (None, "టమాటాలో ఎర్లీ బ్లైట్ లక్షణాలు ఏమిటి?"),
@@ -116,7 +118,7 @@ def main() -> int:
 
     send = ask_stream if args.stream else ask
     ok = True
-    with httpx.Client(timeout=90) as client:
+    with httpx.Client(timeout=90, headers=api_headers()) as client:
         for language, message in questions:
             ok = send(client, args.url, message, language) and ok
     return 0 if ok else 1

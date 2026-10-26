@@ -26,6 +26,8 @@ from typing import Any
 
 import httpx
 
+from scripts.api_auth import api_headers
+
 ROOT = Path(__file__).resolve().parent.parent
 DECLINE_WORDS = (
     "agricultur", "farm", "crop", "వ్యవసాయ", "పంట", "कृषि", "खेती", "फसल", "ಕೃಷಿ", "ಬೆಳೆ",
@@ -101,7 +103,7 @@ def main() -> int:
 
     results: list[dict[str, Any]] = []
     latencies: list[float] = []
-    with httpx.Client(base_url=args.url, timeout=120) as client:
+    with httpx.Client(base_url=args.url, timeout=120, headers=api_headers()) as client:
         for index, case in enumerate(cases):
             if index:
                 time.sleep(args.delay)

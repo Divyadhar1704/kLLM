@@ -27,6 +27,8 @@ from typing import Any
 
 import httpx
 
+from scripts.api_auth import api_headers
+
 ROOT = Path(__file__).resolve().parent.parent
 
 QUESTIONS = [
@@ -136,7 +138,7 @@ async def load(client: httpx.AsyncClient, level: int, offset: int) -> dict[str, 
 
 
 async def main(url: str, n_questions: int, levels: list[int], delay: float, label: str) -> int:
-    async with httpx.AsyncClient(base_url=url, timeout=120) as client:
+    async with httpx.AsyncClient(base_url=url, timeout=120, headers=api_headers()) as client:
         print("=== stage breakdown (one at a time) ===")
         breakdown = await stage_breakdown(client, QUESTIONS[:n_questions], delay)
         print("\n=== repeat question ===")

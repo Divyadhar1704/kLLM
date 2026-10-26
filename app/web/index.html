@@ -37,6 +37,8 @@
   .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; font-size: 12px; }
   .new-conv, .rate { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--bg);
     color: var(--ink); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+  .api-key { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+    border-radius: 6px; padding: 2px 8px; width: 170px; }
   .rate.chosen { border-color: var(--accent); background: var(--user-bg); }
   .chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
   .chip.good { color: var(--accent); border-color: var(--accent); }
@@ -79,6 +81,7 @@
 <header>
   <h1>🌾 KrishiMitra</h1>
   <span class="tag">developer test console — not the farmer app</span>
+  <input id="api-key" class="api-key" type="password" autocomplete="off" placeholder="API key (if required)" title="X-API-Key, kept for this tab only">
   <button type="button" id="new-conv" class="new-conv" title="Forget the conversation history">New conversation</button>
   <div class="status" id="status"><span><span class="dot"></span>checking…</span></div>
 </header>
@@ -292,7 +295,7 @@ async function ask(text) {
     if (photo) await askPhoto(turn, photo, message, start);
     else if ($("stream").checked) await askStream(turn, payload, start);
     else {
-      const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const r = await fetch(API, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(payload) });
       const body = await r.json().catch(() => null);
       if (!r.ok) showError(turn, r.status, body);
       else renderResult(turn, body, performance.now() - start, null);
@@ -316,7 +319,7 @@ async function askPhoto(turn, photo, message, start) {
   if (conversationId) form.append("conversation_id", conversationId);
   const endpoint = isVideo(photo) ? "/video" : "/image";
   clearPhoto();
-  const r = await fetch(API + endpoint, { method: "POST", body: form });
+  const r = await fetch(API + endpoint, { method: "POST", headers: authHeaders(), body: form });
   const body = await r.json().catch(() => null);
   if (!r.ok) { showError(turn, r.status, body); return; }
   renderResult(turn, body, performance.now() - start, null);
@@ -347,8 +350,19 @@ function renderDiagnosis(turn, d) {
 
 let conversationId = null;
 
+// Optional API key (needed only where AUTH_REQUIRED is on). Kept for this browser tab only.
+const keyInput = $("api-key");
+try { keyInput.value = sessionStorage.getItem("km-api-key") || ""; } catch {}
+keyInput.addEventListener("change", () => {
+  try { sessionStorage.setItem("km-api-key", keyInput.value.trim()); } catch {}
+});
+function authHeaders(extra = {}) {
+  const key = keyInput.value.trim();
+  return key ? { ...extra, "X-API-Key": key } : extra;
+}
+
 async function rate(messageId, rating, button) {
-  const r = await fetch("/api/v1/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+  const r = await fetch("/api/v1/feedback", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ message_id: messageId, rating }) });
   if (r.ok) {
     button.parentElement.querySelectorAll(".rate").forEach((b) => b.classList.remove("chosen"));
@@ -370,7 +384,7 @@ function clearPhoto() {
 }
 
 async function askStream(turn, payload, start) {
-  const r = await fetch(API + "/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const r = await fetch(API + "/stream", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(payload) });
   if (!r.ok) { showError(turn, r.status, await r.json().catch(() => null)); return; }
   const answer = turn.querySelector(".answer");
   const reader = r.body.getReader();

@@ -14,6 +14,7 @@ SECURE_PRODUCTION: dict[str, Any] = {
     "gcp_project_id": "p",
     "gcs_bucket": "b",
     "log_json": True,
+    "auth_required": True,
 }
 
 

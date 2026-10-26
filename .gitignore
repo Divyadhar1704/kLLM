@@ -50,3 +50,6 @@ evals/reports/
 # Local handoff notes for other AI tools (not project documentation)
 HANDOFF.md
 HANDOFF.pdf
+
+# Local media storage (MEDIA_STORAGE=local)
+.media/

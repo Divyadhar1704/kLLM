@@ -6,7 +6,17 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -16,6 +26,9 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # "<client>:<user>" (or "<client>" without a user). Another owner's id acts as not found.
+    # NULL = created before Phase 22 (development data): treated as "anonymous".
+    owner_id: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
     language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -45,6 +58,9 @@ class ConversationMessage(Base):
 
 class MediaRecord(Base):
     __tablename__ = "media_records"
+    __table_args__ = (
+        UniqueConstraint("storage_backend", "storage_key", name="uq_media_records_storage_key"),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, default=lambda: uuid.uuid4().hex)
     conversation_id: Mapped[str | None] = mapped_column(
@@ -56,7 +72,9 @@ class MediaRecord(Base):
         nullable=True,
         index=True,
     )
-    kind: Mapped[str] = mapped_column(String(16))
+    kind: Mapped[str] = mapped_column(String(16))  # photo | video_frame
+    storage_backend: Mapped[str] = mapped_column(String(16))  # local | gcs
+    storage_key: Mapped[str] = mapped_column(String(512))
     mime_type: Mapped[str] = mapped_column(String(64))
     size_bytes: Mapped[int] = mapped_column(Integer)
     sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -64,7 +82,9 @@ class MediaRecord(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     meta: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
 
 
 class Feedback(Base):

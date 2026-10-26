@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field, model_validator
 
 from app.api.deps import RequiredConversationsDep
+from app.api.security import PrincipalDep
 from app.schemas.chat import ConversationId
 from app.schemas.errors import ErrorResponse
 
@@ -51,9 +52,10 @@ class FeedbackResponse(BaseModel):
     },
 )
 async def save_feedback(
-    body: FeedbackRequest, conversations: RequiredConversationsDep
+    body: FeedbackRequest, conversations: RequiredConversationsDep, principal: PrincipalDep
 ) -> FeedbackResponse:
     feedback_id = await conversations.save_feedback(
+        owner=principal.owner,
         conversation_id=body.conversation_id,
         message_id=body.message_id,
         rating=body.rating,

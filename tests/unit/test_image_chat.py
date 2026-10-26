@@ -13,9 +13,9 @@ from app.rag.retriever import RetrievalResult
 from app.services.image_chat import crop_from_text, photo_context, retrieval_query
 from app.services.safety import PesticideSafetyChecker, Restriction
 from app.vision.diagnosis import Alternative, Diagnosis
-from app.vision.images import ImageQuality
+from app.vision.images import ImageQuality, PreparedImage
 from app.vision.taxonomy import condition
-from app.vision.video import VideoInfo
+from app.vision.video import PreparedVideo, VideoFrameSample, VideoInfo
 from tests.fakes import FakeLLM
 from tests.unit.test_chat_rag import FakeRetriever, chunk
 
@@ -57,21 +57,47 @@ def diagnosis(
     )
 
 
+def prepared_image(data: bytes = b"cleaned jpeg") -> PreparedImage:
+    return PreparedImage(
+        data=data,
+        mime_type="image/jpeg",
+        original_format="JPEG",
+        original_bytes=len(data),
+        quality=QUALITY,
+        model_size=(800, 600),
+    )
+
+
 class FakeDiagnoser:
+    """Stands in for VisionDiagnoser's prepare + diagnose_prepared steps."""
+
     def __init__(self, result: Diagnosis) -> None:
         self.result = result
         self.calls: list[dict[str, Any]] = []
 
-    async def diagnose(
-        self, data: bytes, *, note: str | None = None, crop: str | None = None
+    async def prepare(self, data: bytes) -> PreparedImage:
+        return prepared_image(b"cleaned:" + data)
+
+    async def prepare_video(self, data: bytes) -> PreparedVideo:
+        frames = tuple(
+            VideoFrameSample(t, prepared_image(f"frame {t}".encode())) for t in (1.0, 4.0)
+        )
+        return PreparedVideo(
+            frames=frames, quality=QUALITY, info=VIDEO_INFO, original_bytes=len(data)
+        )
+
+    async def diagnose_prepared(
+        self, image: PreparedImage, *, note: str | None = None, crop: str | None = None
     ) -> Diagnosis:
-        self.calls.append({"kind": "image", "bytes": len(data), "note": note, "crop": crop})
+        self.calls.append({"kind": "image", "bytes": len(image.data), "note": note, "crop": crop})
         return self.result
 
-    async def diagnose_video(
-        self, data: bytes, *, note: str | None = None, crop: str | None = None
+    async def diagnose_prepared_video(
+        self, video: PreparedVideo, *, note: str | None = None, crop: str | None = None
     ) -> Diagnosis:
-        self.calls.append({"kind": "video", "bytes": len(data), "note": note, "crop": crop})
+        self.calls.append(
+            {"kind": "video", "bytes": video.original_bytes, "note": note, "crop": crop}
+        )
         return self.result
 
 

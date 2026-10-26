@@ -154,6 +154,7 @@ def test_search_statement_without_filters() -> None:
 def test_models_define_expected_tables() -> None:
     tables = Base.metadata.tables
     expected = {
+        "api_clients",
         "rag_documents",
         "rag_chunks",
         "pesticide_restrictions",

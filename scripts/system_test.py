@@ -21,6 +21,8 @@ from collections.abc import Awaitable, Callable
 
 import httpx
 
+from scripts.api_auth import api_headers
+
 Check = tuple[str, bool, str]
 
 
@@ -246,7 +248,9 @@ async def concurrency(client: httpx.AsyncClient, use_ai: bool, ai_requests: int)
 
 async def main(url: str, use_ai: bool, ai_requests: int) -> int:
     limits = httpx.Limits(max_connections=200, max_keepalive_connections=50)
-    async with httpx.AsyncClient(base_url=url, timeout=120, limits=limits) as client:
+    async with httpx.AsyncClient(
+        base_url=url, timeout=120, limits=limits, headers=api_headers()
+    ) as client:
         print("=== edge cases, errors, security ===")
         results = await run_checks(client, use_ai)
         print("\n=== concurrency ===")

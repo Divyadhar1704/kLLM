@@ -40,7 +40,7 @@ from app.schemas.chat import (
 )
 from app.services.answer_cache import AnswerCache
 from app.services.citations import CitationStreamNormalizer, normalize_citations
-from app.services.conversations import ConversationStore
+from app.services.conversations import LEGACY_OWNER, ConversationStore
 from app.services.language import LanguageCode, detect_language_with_method, language_quality
 from app.services.llm import ChatTurn, LLMProvider, LLMRequest, LLMResponse, StreamDelta, StreamEnd
 from app.services.llm.errors import LLMError, LLMResponseError
@@ -140,7 +140,9 @@ class ChatService:
         safety: PesticideSafety | None = None,
         answer_cache: AnswerCache | None = None,
         conversations: ConversationStore | None = None,
+        owner: str = LEGACY_OWNER,
     ) -> None:
+        self._owner = owner  # Principal.owner of the caller: conversations are per owner
         self._llm = llm
         self._settings = settings
         self._retriever = retriever if settings.rag_enabled else None
@@ -187,6 +189,7 @@ class ChatService:
             return response
         message_id = await self._conversations.save_turn(
             conversation_id=response.conversation_id,
+            owner=self._owner,
             language=response.language,
             question=question,
             answer=response.response,
@@ -206,7 +209,12 @@ class ChatService:
     async def _load_history(self, request: ChatRequest) -> tuple[ChatTurn, ...]:
         if self._conversations is None or request.conversation_id is None:
             return ()
-        return await self._conversations.history(request.conversation_id)
+        return await self._conversations.history(request.conversation_id, owner=self._owner)
+
+    async def check_conversation(self, conversation_id: str | None) -> None:
+        """404 for another owner's conversation (photo / video requests load no history)."""
+        if self._conversations is not None and conversation_id is not None:
+            await self._conversations.check_owner(conversation_id, owner=self._owner)
 
     # ------------------------------------------------------------------ answer cache
 

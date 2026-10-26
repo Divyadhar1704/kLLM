@@ -3,6 +3,8 @@
 Storing history is best-effort: a slow or failing database never fails or delays a chat answer
 by more than `timeout_seconds`; the answer is returned without a `message_id` instead.
 
+- Every conversation has an owner (`Principal.owner`). Another owner's conversation_id is
+  answered exactly like an unknown one (404): its existence is not revealed.
 - History is returned as chat turns (user / model), oldest first, each turn truncated, so the
   model sees a real multi-turn conversation instead of history pasted into the question.
 - Timestamps are set here, not by the database: the user question and the answer are written
@@ -30,6 +32,15 @@ logger = get_logger(__name__)
 
 HISTORY_MESSAGES = 6  # last 3 question/answer pairs
 MAX_TURN_CHARS = 1200  # long answers are cut: the gist is enough for follow-ups
+LEGACY_OWNER = "anonymous"  # conversations stored before owners existed (development data)
+
+
+def owner_of(conversation: Conversation) -> str:
+    return conversation.owner_id or LEGACY_OWNER
+
+
+def _not_found() -> NotFoundError:
+    return NotFoundError("Unknown conversation_id.")
 
 
 class ConversationStore:
@@ -38,25 +49,32 @@ class ConversationStore:
         self._timeout = timeout_seconds
 
     async def history(
-        self, conversation_id: str, *, max_messages: int = HISTORY_MESSAGES
+        self, conversation_id: str, *, owner: str, max_messages: int = HISTORY_MESSAGES
     ) -> tuple[ChatTurn, ...]:
-        """Previous turns, oldest first. Empty on a new conversation or a database problem."""
+        """Previous turns, oldest first. Empty for a new conversation or on a database problem.
+        Raises NotFoundError if the conversation belongs to someone else."""
 
-        async def query(session: AsyncSession) -> list[tuple[str, str]]:
+        async def query(session: AsyncSession) -> tuple[str | None, list[tuple[str, str]]]:
+            conversation = await session.get(Conversation, conversation_id)
+            if conversation is None:
+                return None, []
             rows = await session.execute(
                 select(ConversationMessage.role, ConversationMessage.content)
                 .where(ConversationMessage.conversation_id == conversation_id)
                 .order_by(desc(ConversationMessage.created_at))
                 .limit(max_messages)
             )
-            return [(row.role, row.content) for row in rows]
+            return owner_of(conversation), [(row.role, row.content) for row in rows]
 
         try:
             async with asyncio.timeout(self._timeout):
-                rows = await self._db.read(query)
+                stored_owner, rows = await self._db.read(query)
         except Exception as exc:  # degrade to no history, never fail the answer
             logger.warning("conversation_history_failed", error=type(exc).__name__)
             return ()
+        if stored_owner is not None and stored_owner != owner:
+            logger.warning("conversation_owner_mismatch", conversation_id=conversation_id)
+            raise _not_found()
         turns = [
             ChatTurn(
                 role="user" if role == "user" else "model",
@@ -68,10 +86,29 @@ class ConversationStore:
             turns.pop(0)
         return tuple(turns)
 
+    async def check_owner(self, conversation_id: str, *, owner: str) -> None:
+        """For requests that do not load history (photo / video): NotFoundError if the
+        conversation belongs to someone else. A database problem is not an error here."""
+
+        async def query(session: AsyncSession) -> str | None:
+            conversation = await session.get(Conversation, conversation_id)
+            return owner_of(conversation) if conversation is not None else None
+
+        try:
+            async with asyncio.timeout(self._timeout):
+                stored_owner = await self._db.read(query)
+        except Exception as exc:
+            logger.warning("conversation_owner_check_failed", error=type(exc).__name__)
+            return
+        if stored_owner is not None and stored_owner != owner:
+            logger.warning("conversation_owner_mismatch", conversation_id=conversation_id)
+            raise _not_found()
+
     async def save_turn(
         self,
         *,
         conversation_id: str,
+        owner: str,
         language: str,
         question: str,
         answer: str,
@@ -89,9 +126,16 @@ class ConversationStore:
                 if conversation is None:
                     session.add(
                         Conversation(
-                            id=conversation_id, language=language, last_message_at=asked_at
+                            id=conversation_id,
+                            owner_id=owner,
+                            language=language,
+                            last_message_at=asked_at,
                         )
                     )
+                elif owner_of(conversation) != owner:
+                    # Checked before answering; reaching this means a race on a new id.
+                    logger.warning("conversation_owner_mismatch", conversation_id=conversation_id)
+                    return None
                 else:
                     conversation.language = language
                     conversation.last_message_at = asked_at
@@ -132,24 +176,29 @@ class ConversationStore:
     async def save_feedback(
         self,
         *,
+        owner: str,
         conversation_id: str | None,
         message_id: str | None,
         rating: str,
         comment: str | None,
     ) -> str:
-        """Store a rating for an existing answer or conversation. Raises NotFoundError."""
+        """Store a rating for one of the caller's answers or conversations. NotFoundError for
+        unknown ids and for other owners' ids alike."""
         async with self._db.session() as session:
             if message_id is not None:
                 message = await session.get(ConversationMessage, message_id)
                 if message is None or message.role != "assistant":
                     raise NotFoundError("Unknown message_id.")
                 if conversation_id is not None and message.conversation_id != conversation_id:
-                    raise NotFoundError("message_id does not belong to this conversation.")
+                    raise NotFoundError("Unknown message_id.")
                 conversation_id = message.conversation_id
-            elif (
-                conversation_id is None or await session.get(Conversation, conversation_id) is None
-            ):
-                raise NotFoundError("Unknown conversation_id.")
+            if conversation_id is None:
+                raise _not_found()
+            conversation = await session.get(Conversation, conversation_id)
+            if conversation is None or owner_of(conversation) != owner:
+                raise NotFoundError(
+                    "Unknown message_id." if message_id else "Unknown conversation_id."
+                )
             feedback = Feedback(
                 id=uuid.uuid4().hex,
                 conversation_id=conversation_id,

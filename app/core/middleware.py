@@ -101,6 +101,9 @@ class RequestContextMiddleware:
         else:
             log = logger.info
 
+        # Who called (audit): set by app.api.security once the caller is identified. The
+        # farmer id is logged only as a hash.
+        principal = (scope.get("state") or {}).get("principal")
         log(
             "request_completed",
             method=scope.get("method"),
@@ -108,6 +111,9 @@ class RequestContextMiddleware:
             status_code=status,
             duration_ms=duration_ms,
             client_ip=client[0] if client else None,
+            caller=principal.client_id if principal is not None else None,
+            auth=principal.method if principal is not None else None,
+            user=principal.subject_hash if principal is not None and principal.user_id else None,
             failed_mid_response=failed and status_code is not None,
         )
 

@@ -27,6 +27,8 @@ pytestmark = [
     ),
 ]
 
+OWNER = "zz-app:farmer-1"
+
 
 @pytest.fixture
 async def database() -> AsyncIterator[Database]:
@@ -42,10 +44,16 @@ async def test_history_round_trip_in_order(database: Database) -> None:
     store = ConversationStore(database, timeout_seconds=15)
     conversation = f"zztest-{uuid.uuid4().hex[:12]}"
     first = await store.save_turn(
-        conversation_id=conversation, language="te", question="q1", answer="a1", sources=[]
+        conversation_id=conversation,
+        owner=OWNER,
+        language="te",
+        question="q1",
+        answer="a1",
+        sources=[],
     )
     second = await store.save_turn(
         conversation_id=conversation,
+        owner=OWNER,
         language="te",
         question="q2",
         answer="a2",
@@ -53,20 +61,24 @@ async def test_history_round_trip_in_order(database: Database) -> None:
         diagnosis={"status": "uncertain"},
     )
     assert first and second
-    turns = await store.history(conversation)
+    turns = await store.history(conversation, owner=OWNER)
     assert [(t.role, t.text) for t in turns] == [
         ("user", "q1"),
         ("model", "a1"),
         ("user", "q2"),
         ("model", "a2"),
     ]
-    assert await store.history("zztest-never-used") == ()
+    assert await store.history("zztest-never-used", owner=OWNER) == ()
 
     feedback_id = await store.save_feedback(
-        conversation_id=None, message_id=second, rating="up", comment="good"
+        owner=OWNER, conversation_id=None, message_id=second, rating="up", comment="good"
     )
     assert feedback_id
     with pytest.raises(NotFoundError):
         await store.save_feedback(
-            conversation_id=None, message_id=uuid.uuid4().hex, rating="up", comment=None
+            owner=OWNER,
+            conversation_id=None,
+            message_id=uuid.uuid4().hex,
+            rating="up",
+            comment=None,
         )

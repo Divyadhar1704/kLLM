@@ -20,6 +20,7 @@ SECURE_DEPLOYED: dict[str, Any] = {
     "gcp_project_id": "krishimitra-staging",
     "gcs_bucket": "krishimitra-media-staging",
     "log_json": True,
+    "auth_required": True,
 }
 
 

@@ -7,6 +7,7 @@ photo or video (+ optional question, crop, language)
   -> retrieval for the diagnosed condition (+ the farmer's own words)
   -> answer with the analysis and numbered sources; uncertain = "may be"
   -> pesticide safety check
+  -> (background) cleaned photo / video frames kept with the answer (app.services.media_archive)
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from app.schemas.vision import DiagnosisResponse
 from app.services.chat import ChatService, PreparedChat
 from app.services.language import LanguageCode, detect_language_with_method
 from app.services.llm import ChatTurn, LLMRequest
+from app.services.media_archive import MediaArchive, MediaItem
 from app.services.prompts import build_system_prompt, build_user_message
 from app.vision.diagnosis import Diagnosis, VisionDiagnoser
 from app.vision.taxonomy import CROPS, UNKNOWN, crop_name
@@ -140,16 +142,23 @@ def photo_context(diagnosis: Diagnosis, crop_confirmed: bool) -> str:
     return "\n".join(lines)
 
 
-Diagnose = Callable[[str | None, str | None], Awaitable[Diagnosis]]  # (note, crop) -> diagnosis
+# (note, crop) -> diagnosis + the cleaned images it was made from (for the media archive)
+Diagnose = Callable[[str | None, str | None], Awaitable[tuple[Diagnosis, list[MediaItem]]]]
 
 
 class ImageChatService:
     def __init__(
-        self, *, chat: ChatService, diagnoser: VisionDiagnoser, retriever: Retriever | None
+        self,
+        *,
+        chat: ChatService,
+        diagnoser: VisionDiagnoser,
+        retriever: Retriever | None,
+        archive: MediaArchive | None = None,
     ) -> None:
         self._chat = chat
         self._diagnoser = diagnoser
         self._retriever = retriever
+        self._archive = archive
 
     async def answer(
         self,
@@ -161,8 +170,10 @@ class ImageChatService:
         conversation_id: str | None,
         debug: bool,
     ) -> ChatResponse:
-        async def diagnose(note: str | None, crop: str | None) -> Diagnosis:
-            return await self._diagnoser.diagnose(image, note=note, crop=crop)
+        async def diagnose(note: str | None, crop: str | None) -> tuple[Diagnosis, list[MediaItem]]:
+            prepared = await self._diagnoser.prepare(image)
+            diagnosis = await self._diagnoser.diagnose_prepared(prepared, note=note, crop=crop)
+            return diagnosis, [MediaItem("photo", prepared)]
 
         return await self._answer(
             "photo", diagnose, message, language, crop, conversation_id, debug
@@ -178,8 +189,13 @@ class ImageChatService:
         conversation_id: str | None,
         debug: bool,
     ) -> ChatResponse:
-        async def diagnose(note: str | None, crop: str | None) -> Diagnosis:
-            return await self._diagnoser.diagnose_video(video, note=note, crop=crop)
+        async def diagnose(note: str | None, crop: str | None) -> tuple[Diagnosis, list[MediaItem]]:
+            prepared = await self._diagnoser.prepare_video(video)
+            diagnosis = await self._diagnoser.diagnose_prepared_video(
+                prepared, note=note, crop=crop
+            )
+            frames = [MediaItem("video_frame", f.image, f.time_seconds) for f in prepared.frames]
+            return diagnosis, frames
 
         return await self._answer(
             "video", diagnose, message, language, crop, conversation_id, debug
@@ -212,10 +228,11 @@ class ImageChatService:
         else:
             lang, method = "en", "default"
         crop = crop or crop_from_text(text)
+        await self._chat.check_conversation(conversation_id)  # before any AI work
         conversation = conversation_id or uuid.uuid4().hex
         question = text or DEFAULT_QUESTION[media][lang]
 
-        diagnosis = await diagnose(text or None, crop)
+        diagnosis, media_items = await diagnose(text or None, crop)
         diagnosis_out = DiagnosisResponse.of(diagnosis, 0.0)
 
         if diagnosis.status in ("retake_photo", "not_a_plant"):
@@ -290,6 +307,14 @@ class ImageChatService:
             grounded=response.grounded,
             processing_time=response.processing_time,
         )
+        if self._archive is not None and response.message_id is not None:
+            # Background: the answer is returned now; only diagnosed media is ever kept.
+            self._archive.archive_later(
+                conversation_id=conversation,
+                message_id=response.message_id,
+                items=media_items,
+                diagnosis=diagnosis,
+            )
         return response.model_copy(
             update={
                 "diagnosis": diagnosis_out.model_copy(

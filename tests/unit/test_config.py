@@ -12,6 +12,7 @@ SECURE_DEPLOYED = {
     "gcp_project_id": "krishimitra-prod",
     "gcs_bucket": "krishimitra-media-prod",
     "log_json": True,
+    "auth_required": True,
     "cors_allowed_origins": "https://admin.example.com",
 }
 

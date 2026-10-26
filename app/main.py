@@ -30,12 +30,15 @@ from app.db import Database
 from app.rag.retriever import Retriever
 from app.schemas.errors import ErrorResponse
 from app.services.answer_cache import AnswerCache
+from app.services.auth import ApiKeyStore, TokenVerifier
 from app.services.conversations import ConversationStore
 from app.services.embeddings import build_embedder
 from app.services.health import HealthRegistry
 from app.services.llm import LLMProvider, build_llm
+from app.services.media_archive import MediaArchive
+from app.services.rate_limit import build_rate_limiter
 from app.services.safety import PesticideSafety
-from app.services.storage import StorageService
+from app.services.storage import build_media_store
 from app.vision.diagnosis import VisionDiagnoser
 
 logger = get_logger(__name__)
@@ -118,6 +121,20 @@ def create_app(
             await app.state.safety.ensure_loaded()  # failure is logged and retried later
         if app.state.conversations is None and app.state.db is not None:
             app.state.conversations = ConversationStore(app.state.db)
+        if app.state.api_keys is None and app.state.db is not None:
+            app.state.api_keys = ApiKeyStore(
+                app.state.db, cache_seconds=settings.api_key_cache_seconds
+            )
+        owns_archive = False
+        if app.state.media_archive is None and app.state.db is not None:
+            store = build_media_store(settings)
+            if store is not None:
+                owns_archive = True
+                app.state.media_archive = MediaArchive(
+                    store, app.state.db, url_ttl_seconds=settings.media_url_ttl_seconds
+                )
+                # Non-critical: without storage, answers still work (media is just not kept).
+                app.state.health_registry.register("media_storage", store.check, critical=False)
         owns_diagnoser = settings.vision_enabled and app.state.diagnoser is None
         if owns_diagnoser:
             app.state.diagnoser = VisionDiagnoser.from_settings(settings)
@@ -134,10 +151,19 @@ def create_app(
             if settings.database_enabled
             else "disabled",
             rag=app.state.retriever is not None,
+            media_storage=app.state.media_archive.store.backend
+            if app.state.media_archive is not None
+            else "none",
         )
         try:
             yield
         finally:
+            if app.state.media_archive is not None:
+                await app.state.media_archive.drain()  # finish background saves first
+            await app.state.rate_limiter.aclose()
+            if owns_archive:
+                app.state.media_archive = None
+                app.state.health_registry.unregister("media_storage")
             if owns_diagnoser and app.state.diagnoser is not None:
                 await app.state.diagnoser.aclose()
                 app.state.diagnoser = None
@@ -153,6 +179,7 @@ def create_app(
                 await app.state.db.aclose()
                 app.state.db = None
                 app.state.conversations = None
+                app.state.api_keys = None
                 app.state.health_registry.unregister("postgres")
             logger.info("application_shutdown")
 
@@ -193,14 +220,20 @@ def create_app(
     app.state.safety = None
     app.state.diagnoser = diagnoser
     app.state.conversations = None  # ConversationStore, set at startup when a database exists
-    app.state.storage = StorageService(settings)
+    app.state.media_archive = None  # MediaArchive, set at startup when MEDIA_STORAGE is set
+    app.state.api_keys = None  # ApiKeyStore, set at startup when a database exists
+    app.state.token_verifier = TokenVerifier.from_settings(settings)
+    app.state.rate_limiter = build_rate_limiter(settings)
+    if settings.rate_limit_backend == "redis":
+        # Non-critical: rate limiting fails open when Redis is down.
+        app.state.health_registry.register(
+            "rate_limit_redis", app.state.rate_limiter.check, critical=False
+        )
     app.state.answer_cache = AnswerCache(
         max_items=settings.answer_cache_size, ttl_seconds=settings.answer_cache_ttl_seconds
     )
     if db is not None:
         app.state.health_registry.register("postgres", postgres_check, critical=True)
-    if app.state.storage.is_configured:
-        app.state.health_registry.register("storage", app.state.storage.check, critical=False)
 
     register_exception_handlers(app)
 
