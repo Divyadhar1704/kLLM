@@ -1,0 +1,21 @@
+{"id": "en-01", "language": "en", "question": "What is the waiting period for acetamiprid 20% SP on cotton?", "expect": ["acetamiprid 20% sp"]}
+{"id": "en-02", "language": "en", "question": "Is monocrotophos allowed on vegetables?", "expect": ["monocrotophos"]}
+{"id": "en-03", "language": "en", "question": "Dose of azoxystrobin for early blight in tomato", "expect": ["azoxystrobin"]}
+{"id": "en-04", "language": "en", "question": "How to control fall armyworm in maize?", "expect": ["fall army"]}
+{"id": "te-01", "language": "te", "question": "టమాటాలో ఎర్లీ బ్లైట్ నివారణ ఎలా?", "expect": ["early blight", "alternaria"]}
+{"id": "te-02", "language": "te", "question": "పత్తిలో తెల్లదోమ నివారణకు ఏ మందు వాడాలి?", "expect": ["whitefl"]}
+{"id": "te-03", "language": "te", "question": "మిరపలో తామర పురుగుల నివారణ", "expect": ["thrips"]}
+{"id": "te-04", "language": "te", "question": "బంగాళాదుంపలో లేట్ బ్లైట్ లక్షణాలు ఏమిటి?", "expect": ["late blight"]}
+{"id": "kn-01", "language": "kn", "question": "ತೊಗರಿಯಲ್ಲಿ ಕಾಯಿ ಕೊರಕ ಹುಳುವಿನ ನಿಯಂತ್ರಣ ಹೇಗೆ?", "expect": ["pod borer", "helicoverpa", "maruca"]}
+{"id": "kn-02", "language": "kn", "question": "ಬದನೆಯಲ್ಲಿ ಕಾಂಡ ಮತ್ತು ಕಾಯಿ ಕೊರಕದ ನಿರ್ವಹಣೆ", "expect": ["shoot and fruit borer", "shoot & fruit borer", "leucinodes"]}
+{"id": "kn-03", "language": "kn", "question": "ಶುಂಠಿಯಲ್ಲಿ ಗಡ್ಡೆ ಕೊಳೆ ರೋಗಕ್ಕೆ ಏನು ಮಾಡಬೇಕು?", "expect": ["rhizome rot", "soft rot"]}
+{"id": "kn-04", "language": "kn", "question": "ಸೌತೆಕಾಯಿಯಲ್ಲಿ ಡೌನಿ ಮಿಲ್ಡ್ಯೂ ರೋಗ ನಿಯಂತ್ರಣ", "expect": ["downy mildew"]}
+{"id": "hi-01", "language": "hi", "question": "पत्ता गोभी में डायमंड बैक मोथ के लिए कौन सी दवा?", "expect": ["diamond back", "diamondback", "plutella"]}
+{"id": "hi-02", "language": "hi", "question": "मिर्च में थ्रिप्स का नियंत्रण कैसे करें?", "expect": ["thrips"]}
+{"id": "hi-03", "language": "hi", "question": "आलू में पछेती झुलसा रोग का उपचार", "expect": ["late blight"]}
+{"id": "hi-04", "language": "hi", "question": "भारत में कौन से कीटनाशक प्रतिबंधित हैं?", "expect": ["banned"]}
+{"id": "kn-05", "language": "kn", "question": "ಭತ್ತದಲ್ಲಿ ಬೆಂಕಿ ರೋಗ (ಬ್ಲಾಸ್ಟ್) ತಡೆಯುವುದು ಹೇಗೆ?", "expect": ["blast"]}
+{"id": "te-05", "language": "te", "question": "వేరుశనగలో తిక్క ఆకుమచ్చ తెగులుకు మందు ఏమిటి?", "expect": ["tikka"]}
+{"id": "te-06", "language": "te", "question": "pattilo tella doma nivaranaku e mandu vadali", "expect": ["whitefl", "white fl"]}
+{"id": "hi-05", "language": "hi", "question": "कपास में सफेद मक्खी का नियंत्रण कैसे करें?", "expect": ["whitefl", "white fl"]}
+{"id": "hi-06", "language": "hi", "question": "gehu mein peela ratua rog ka ilaj kya hai", "expect": ["yellow rust", "stripe rust"]}

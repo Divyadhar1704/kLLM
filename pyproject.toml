@@ -1,0 +1,67 @@
+[project]
+name = "krishimitra-backend"
+version = "0.1.0"
+description = "KrishiMitra LLM - AI agricultural assistant backend for the Krishindra application"
+requires-python = ">=3.12,<3.13"
+readme = "README.md"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["."]
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "N",    # pep8-naming
+    "S",    # bandit (security)
+    "ASYNC",# async pitfalls
+    "C4",   # comprehensions
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "B008",  # FastAPI Depends() in defaults is idiomatic
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests", "scripts"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S105", "S106"]
+"scripts/**/*.py" = ["S603", "S607"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+warn_unused_configs = true
+packages = ["app"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra --strict-markers"
+markers = [
+    "integration: requires running Postgres/Redis (docker compose)",
+    "external: calls paid external APIs (LLM, embeddings); skipped by default in CI",
+]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true

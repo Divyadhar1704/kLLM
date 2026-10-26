@@ -1,0 +1,20 @@
+# Runtime dependencies (top-level). Locked versions live in requirements.txt.
+# Regenerate lock: pip-compile requirements.in -o requirements.txt
+# New dependencies are added phase by phase.
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.8
+pydantic-settings>=2.4
+structlog>=24.4
+google-genai>=1.0
+pypdf>=5.0
+pdfplumber>=0.11
+sqlalchemy[asyncio]>=2.0
+asyncpg>=0.29
+alembic>=1.13
+pgvector>=0.3
+pillow>=10.4
+av>=14  # video decoding; wheels bundle FFmpeg (no system packages needed)
+python-multipart>=0.0.9
+google-cloud-storage>=2.19
