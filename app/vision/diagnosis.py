@@ -25,6 +25,7 @@ from typing import Any, Literal
 from google.genai import types
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from app.core import metrics
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.services.google_client import create_genai_client
@@ -357,6 +358,7 @@ class VisionDiagnoser:
     def _retake(
         self, quality: ImageQuality, *, source: str, video: VideoInfo | None = None
     ) -> Diagnosis:
+        metrics.diagnoses.labels("video" if source == "video" else "photo", "retake_photo").inc()
         logger.info("image_rejected_quality", source=source, issues=quality.issues)
         return Diagnosis(
             status="retake_photo",
@@ -417,6 +419,7 @@ class VisionDiagnoser:
             output_tokens=usage[1],
             video=video,
         )
+        metrics.diagnoses.labels("video" if video is not None else "photo", status).inc()
         logger.info(
             "image_diagnosed",
             source="video" if video is not None else "image",
@@ -494,14 +497,21 @@ class VisionDiagnoser:
                     model=model, contents=contents, config=config
                 )
         except Exception as exc:
-            raise translate_error(exc) from exc
+            error = translate_error(exc)
+            metrics.llm_calls.labels("vision", model, error.code).inc()
+            raise error from exc
         latency_ms = round((time.perf_counter() - start) * 1000, 1)
+        meta = response.usage_metadata
+        usage = (meta.prompt_token_count or 0, meta.candidates_token_count or 0) if meta else (0, 0)
+        metrics.llm_duration.labels("vision", model).observe(latency_ms / 1000)
+        metrics.llm_tokens.labels("vision", model, "input").inc(usage[0])
+        metrics.llm_tokens.labels("vision", model, "output").inc(usage[1])
         try:
             output = VisionOutput.model_validate(json.loads(response.text or ""))
         except (ValueError, ValidationError) as exc:
+            metrics.llm_calls.labels("vision", model, "invalid_output").inc()
             raise LLMResponseError("The image model returned an invalid result.") from exc
-        meta = response.usage_metadata
-        usage = (meta.prompt_token_count or 0, meta.candidates_token_count or 0) if meta else (0, 0)
+        metrics.llm_calls.labels("vision", model, "ok").inc()
         return output, model, latency_ms, usage
 
     async def warmup(self) -> None:

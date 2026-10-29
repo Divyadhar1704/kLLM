@@ -162,6 +162,11 @@ class Settings(BaseSettings):
     video_candidate_frames: int = Field(default=16, ge=4, le=60)  # frames quality-checked
     video_max_concurrent: int = Field(default=2, ge=1, le=16)  # decodes at once per instance
 
+    # --- Monitoring ---
+    # Prometheus metrics on 127.0.0.1:METRICS_PORT, for the monitoring sidecar in the same
+    # container (Cloud Run). Never public. Locally, /metrics on the app port is enough.
+    metrics_port: int | None = Field(default=None, ge=1024, le=65535)
+
     # --- Authentication ---
     # Required in staging/production (validated). Off locally so /dev and the evals work.
     auth_required: bool = False

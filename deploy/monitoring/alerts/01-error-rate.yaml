@@ -1,0 +1,22 @@
+displayName: "KrishiMitra: server errors above 5%"
+severity: ERROR
+combiner: OR
+conditions:
+  - displayName: "5xx share of API requests (10 min)"
+    conditionPrometheusQueryLanguage:
+      query: |
+        sum(rate(krishimitra_http_requests_total{route=~"/api/.*", status=~"5.."}[5m]))
+          / clamp_min(sum(rate(krishimitra_http_requests_total{route=~"/api/.*"}[5m])), 0.001)
+          > 0.05
+      duration: 600s
+      evaluationInterval: 60s
+alertStrategy:
+  autoClose: 1800s
+documentation:
+  mimeType: text/markdown
+  content: |
+    More than 5% of API requests fail with a server error.
+    1. Error Reporting: new error groups for service `krishimitra-api`.
+    2. Logs: `severity>=ERROR resource.labels.service_name="krishimitra-api"`.
+    3. Readiness: `/health/ready` (postgres is critical).
+    4. AI side: alert "AI quota" / `krishimitra_llm_calls_total` outcomes.

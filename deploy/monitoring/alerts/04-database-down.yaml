@@ -1,0 +1,19 @@
+displayName: "KrishiMitra: database unreachable"
+severity: CRITICAL
+combiner: OR
+conditions:
+  - displayName: "postgres readiness check failing (5 min)"
+    conditionPrometheusQueryLanguage:
+      # Updated by every /health/ready call (Cloud Run probe + uptime check).
+      query: |
+        min(krishimitra_dependency_up{name="postgres"}) < 1
+      duration: 300s
+      evaluationInterval: 60s
+alertStrategy:
+  autoClose: 1800s
+documentation:
+  mimeType: text/markdown
+  content: |
+    The API cannot reach Postgres: document search, history and API keys fail.
+    Check the database instance status, connection limits and network; a Supabase free
+    project pauses after a week without use ("tenant/user not found").

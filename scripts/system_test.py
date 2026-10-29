@@ -198,26 +198,24 @@ async def concurrency(client: httpx.AsyncClient, use_ai: bool, ai_requests: int)
     results: list[Check] = []
 
     async def burst(
-        name: str, count: int, make: Callable[[int], Awaitable[httpx.Response]], expect: int
+        name: str,
+        count: int,
+        make: Callable[[int], Awaitable[httpx.Response]],
+        expect: int,
+        accept: Callable[[Counter[object]], bool] | None = None,
     ) -> None:
         start = time.perf_counter()
         responses = await asyncio.gather(*(make(i) for i in range(count)), return_exceptions=True)
         seconds = time.perf_counter() - start
-        codes = Counter(
+        codes: Counter[object] = Counter(
             r.status_code if isinstance(r, httpx.Response) else type(r).__name__ for r in responses
         )
-        ok = codes.get(expect, 0) == count
+        ok = accept(codes) if accept else codes.get(expect, 0) == count
         detail = f"{dict(codes)} in {seconds:.1f}s"
         results.append((name, ok, detail))
         print(f"{'PASS' if ok else 'FAIL'}  {name:58} {detail}")
 
     await burst("50 concurrent /health/ready", 50, lambda i: client.get("/health/ready"), 200)
-    await burst(
-        "100 concurrent invalid requests (no AI)",
-        100,
-        lambda i: client.post("/api/v1/chat", json={"message": ""}),
-        422,
-    )
     if use_ai and ai_requests:
         questions = [
             "Symptoms of early blight in tomato?",
@@ -243,6 +241,15 @@ async def concurrency(client: httpx.AsyncClient, use_ai: bool, ai_requests: int)
                 f"        latency under concurrency: p50 {statistics.median(latencies):.1f}s "
                 f"max {max(latencies):.1f}s"
             )
+    # Last, because it uses up this client's per-minute allowance: every request is rejected
+    # cleanly (422 invalid input, or 429 once the rate limit is reached), never a server error.
+    await burst(
+        "100 concurrent invalid requests: 422 or rate-limited 429",
+        100,
+        lambda i: client.post("/api/v1/chat", json={"message": ""}),
+        422,
+        accept=lambda codes: set(codes) <= {422, 429} and codes.get(429, 0) > 0,
+    )
     return results
 
 

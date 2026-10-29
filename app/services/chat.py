@@ -23,6 +23,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from app.core import metrics
 from app.core.config import Settings
 from app.core.errors import BadRequestError
 from app.core.logging import get_logger
@@ -113,6 +114,7 @@ class PreparedChat:
     llm_request: LLMRequest
     start: float
     detection_method: str
+    kind: Literal["text", "photo", "video"] = "text"  # for metrics
 
     @property
     def sources(self) -> list[Source]:
@@ -224,10 +226,18 @@ class ChatService:
         return AnswerCache.key(request.message, request.language, self._llm.model, PROMPT_VERSION)
 
     def _from_cache(
-        self, key: str | None, request: ChatRequest, start: float
+        self, key: str | None, request: ChatRequest, start: float, *, streamed: bool = False
     ) -> ChatResponse | None:
-        if key is None or self._cache is None or (stored := self._cache.get(key)) is None:
+        if key is None or self._cache is None:
             return None
+        if (stored := self._cache.get(key)) is None:
+            metrics.answer_cache.labels("miss").inc()
+            return None
+        metrics.answer_cache.labels("hit").inc()
+        # A cached answer is still an answer sent: count it, or usage per language undercounts.
+        metrics.answers.labels(
+            "text", stored.language, str(stored.grounded).lower(), str(streamed).lower()
+        ).inc()
         response = stored.model_copy(
             update={
                 "conversation_id": request.conversation_id or uuid.uuid4().hex,
@@ -419,6 +429,9 @@ class ChatService:
 
         processing_time = round(time.perf_counter() - prepared.start, 3)
         retrieval = prepared.retrieval
+        self._record(
+            prepared, streamed=ttft_ms is not None, retried=language_retried, warned=bool(warnings)
+        )
         logger.info(
             "chat_answered",
             conversation_id=prepared.conversation_id,
@@ -477,6 +490,22 @@ class ChatService:
             ),
         )
         return response, warnings
+
+    @staticmethod
+    def _record(prepared: PreparedChat, *, streamed: bool, retried: bool, warned: bool) -> None:
+        language = prepared.language
+        metrics.answers.labels(
+            prepared.kind, language, str(bool(prepared.used_chunks)).lower(), str(streamed).lower()
+        ).inc()
+        if retried:
+            metrics.language_retries.labels(language).inc()
+        if warned:
+            metrics.safety_warnings.labels(language).inc()
+        retrieval = prepared.retrieval
+        if retrieval.error is not None:
+            metrics.retrieval_errors.inc()
+        if retrieval.total_ms:
+            metrics.retrieval_duration.observe(retrieval.total_ms / 1000)
 
     # ------------------------------------------------------------------ debug
 

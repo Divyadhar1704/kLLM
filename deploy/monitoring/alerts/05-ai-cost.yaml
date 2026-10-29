@@ -1,0 +1,20 @@
+displayName: "KrishiMitra: AI cost above the daily budget"
+severity: WARNING
+combiner: OR
+conditions:
+  - displayName: "Estimated chat AI cost over the last 24 h above 5 USD"
+    conditionPrometheusQueryLanguage:
+      # Uses LLM_INPUT/OUTPUT_PRICE_PER_MILLION (0 on the free tier). Set the threshold to the
+      # agreed daily budget. Photo/video calls: see krishimitra_llm_tokens_total{purpose="vision"}.
+      query: |
+        sum(increase(krishimitra_llm_cost_usd_total[24h])) > 5
+      duration: 0s
+      evaluationInterval: 300s
+alertStrategy:
+  autoClose: 86400s
+documentation:
+  mimeType: text/markdown
+  content: |
+    The estimated AI spend of the last 24 hours is above budget. Check traffic per client
+    (logs: `caller`), rate limits, and the answer cache hit rate. A Cloud Billing budget
+    alert on the project is the authoritative cost control; this one reacts within minutes.

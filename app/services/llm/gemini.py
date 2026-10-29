@@ -16,6 +16,7 @@ import httpx
 from google.genai import errors as genai_errors
 from google.genai import types
 
+from app.core import metrics
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.services.google_client import create_genai_client
@@ -224,6 +225,15 @@ class GeminiProvider:
             truncated=finish == "MAX_TOKENS",
             cost_usd=self._cost(usage),
         )
+        metrics.llm_calls.labels("chat", self._model, "ok").inc()
+        metrics.llm_duration.labels("chat", self._model).observe(response.latency_ms / 1000)
+        for kind, count in (
+            ("input", usage.input_tokens),
+            ("output", usage.output_tokens),
+            ("thinking", usage.thinking_tokens),
+        ):
+            metrics.llm_tokens.labels("chat", self._model, kind).inc(count)
+        metrics.llm_cost.labels(self._model).inc(response.cost_usd)
         logger.info(
             "llm_call",
             provider=response.provider,
@@ -238,6 +248,7 @@ class GeminiProvider:
         return response
 
     def _log_failure(self, error: LLMError, exc: BaseException, start: float) -> None:
+        metrics.llm_calls.labels("chat", self._model, error.code).inc()
         logger.warning(
             "llm_call_failed",
             provider=self.provider_name,

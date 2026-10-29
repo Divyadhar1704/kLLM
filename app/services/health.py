@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 
+from app.core import metrics
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -135,6 +136,7 @@ class HealthRegistry:
             status, error = "fail", type(exc).__name__
             logger.warning("health_check_failed", check=check.name, exc_info=exc)
         latency_ms = round((time.perf_counter() - start) * 1000, 1)
+        metrics.dependency_up.labels(check.name).set(1 if status == "ok" else 0)
         return CheckResult(
             name=check.name,
             status=status,

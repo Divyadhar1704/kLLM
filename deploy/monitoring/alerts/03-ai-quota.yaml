@@ -1,0 +1,24 @@
+displayName: "KrishiMitra: AI quota exhausted or rate limited"
+severity: CRITICAL
+combiner: OR
+conditions:
+  - displayName: "AI calls refused for quota (any, 10 min)"
+    conditionPrometheusQueryLanguage:
+      query: |
+        sum(increase(krishimitra_llm_calls_total{outcome="llm_quota_exhausted"}[10m])) > 0
+      duration: 0s
+      evaluationInterval: 60s
+  - displayName: "AI calls rate limited by the provider (more than 20 in 10 min)"
+    conditionPrometheusQueryLanguage:
+      query: |
+        sum(increase(krishimitra_llm_calls_total{outcome="llm_rate_limited"}[10m])) > 20
+      duration: 0s
+      evaluationInterval: 60s
+alertStrategy:
+  autoClose: 3600s
+documentation:
+  mimeType: text/markdown
+  content: |
+    The AI provider (Gemini / Vertex AI) refuses calls: farmers get errors.
+    Quota exhausted: raise the quota or the billing limit in the Google Cloud console.
+    Rate limited: requests per minute above the model's limit; request a higher quota.

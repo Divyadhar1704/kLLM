@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from app.core import metrics
 from app.core.config import Settings
 from app.core.errors import RateLimitedError
 from app.core.logging import get_logger
@@ -25,6 +26,7 @@ class Limit:
     key: str  # what is counted, e.g. "user:krishindra-backend:u123"
     limit: int
     window_seconds: int
+    name: str = "limit"  # metric label: user_minute, user_day, client_minute, feedback_minute
 
 
 class RateLimiter(Protocol):
@@ -125,6 +127,7 @@ async def enforce(limiter: RateLimiter, limits: list[Limit]) -> None:
             exceeded.append((limit, reset))
     if exceeded:
         limit, reset = max(exceeded, key=lambda item: item[1])  # the longest wait wins
+        metrics.rate_limited.labels(limit.name).inc()
         logger.info("rate_limited", limit=limit.limit, window_seconds=limit.window_seconds)
         per = "minute" if limit.window_seconds == 60 else "day"
         raise RateLimitedError(

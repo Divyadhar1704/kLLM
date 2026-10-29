@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
+from app.core import metrics
 from app.core.errors import BadRequestError
 from app.core.logging import get_logger
 from app.rag.crops import detect_query_crops
@@ -258,6 +259,7 @@ class ImageChatService:
                 usage=TokenUsage(input_tokens=0, output_tokens=0, thinking_tokens=0),
                 diagnosis=diagnosis_out.model_copy(update={"processing_time": processing_time}),
             )
+            metrics.answers.labels(media, lang, "false", "false").inc()  # fixed message, no AI
             return await self._chat.save(
                 response, question=question, diagnosis=diagnosis_out.model_dump(mode="json")
             )
@@ -293,6 +295,7 @@ class ImageChatService:
             ),
             start=start,
             detection_method=method,
+            kind=media,
         )
         response = await self._chat.generate_prepared(
             prepared, diagnosis=diagnosis_out.model_dump(mode="json")

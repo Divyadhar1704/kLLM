@@ -1,0 +1,21 @@
+displayName: "KrishiMitra: slow answers (p95 above 15 s)"
+severity: WARNING
+combiner: OR
+conditions:
+  - displayName: "p95 duration of text chat requests (15 min)"
+    conditionPrometheusQueryLanguage:
+      query: |
+        histogram_quantile(0.95,
+          sum by (le) (rate(krishimitra_http_request_duration_seconds_bucket{route=~"/api/v1/chat(/stream)?"}[10m]))
+        ) > 15
+      duration: 900s
+      evaluationInterval: 60s
+alertStrategy:
+  autoClose: 3600s
+documentation:
+  mimeType: text/markdown
+  content: |
+    Farmers wait more than 15 s for 5% of text answers (normal p95 is about 8 s).
+    Usually the AI provider: check `krishimitra_llm_call_duration_seconds`, retries and
+    fallbacks (`krishimitra_llm_retries_total`, `krishimitra_llm_fallbacks_total`).
+    Then the database: `krishimitra_retrieval_duration_seconds`.

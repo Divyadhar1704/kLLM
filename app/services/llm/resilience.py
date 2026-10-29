@@ -13,6 +13,7 @@ import dataclasses
 import random
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from app.core import metrics
 from app.core.logging import get_logger
 from app.services.llm.base import (
     LLMProvider,
@@ -66,6 +67,7 @@ class RetryingLLM:
             # A farmer is waiting: don't sleep for the provider's long cooldown; fail over instead.
             return False
         delay = self._delay(attempt)
+        metrics.llm_retries.labels(self.model, exc.code).inc()
         logger.warning(
             "llm_retry",
             model=self.model,
@@ -125,6 +127,7 @@ class FallbackLLM:
         return self._primary.model
 
     def _log_fallback(self, exc: LLMError) -> None:
+        metrics.llm_fallbacks.labels(self._primary.model, exc.code).inc()
         logger.warning(
             "llm_fallback",
             from_model=self._primary.model,

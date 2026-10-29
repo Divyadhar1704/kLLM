@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 from sqlalchemy import delete, select
 
+from app.core import metrics
 from app.core.errors import NotFoundError
 from app.core.logging import get_logger
 from app.db.session import Database
@@ -108,6 +109,7 @@ class MediaArchive:
                 async with self._db.session() as session:
                     session.add_all(records)
         except Exception as exc:
+            metrics.media_archived.labels("failed").inc()
             logger.warning(
                 "media_archive_failed",
                 conversation_id=conversation_id,
@@ -116,6 +118,7 @@ class MediaArchive:
             )
             await self._delete_quietly(stored)
             return []
+        metrics.media_archived.labels("stored").inc()
         logger.info(
             "media_archived",
             conversation_id=conversation_id,

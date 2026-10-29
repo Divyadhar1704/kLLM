@@ -13,9 +13,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_client import start_http_server
 
 from app.api.routes import dev, health
+from app.api.routes import metrics as metrics_routes
 from app.api.v1.router import api_router
+from app.core import metrics
 from app.core.config import Settings, get_settings
 from app.core.errors import REQUEST_ID_HEADER, register_exception_handlers
 from app.core.logging import get_logger, setup_logging
@@ -140,6 +143,10 @@ def create_app(
             app.state.diagnoser = VisionDiagnoser.from_settings(settings)
         if settings.warmup_on_startup:
             await _warmup(app, settings)
+        metrics_server = None
+        if settings.metrics_port is not None:
+            # Loopback only: reachable by the monitoring sidecar, not from the internet.
+            metrics_server, _ = start_http_server(settings.metrics_port, addr="127.0.0.1")
         logger.info(
             "application_startup",
             app_env=settings.app_env,
@@ -151,6 +158,7 @@ def create_app(
             if settings.database_enabled
             else "disabled",
             rag=app.state.retriever is not None,
+            metrics_port=settings.metrics_port,
             media_storage=app.state.media_archive.store.backend
             if app.state.media_archive is not None
             else "none",
@@ -158,6 +166,8 @@ def create_app(
         try:
             yield
         finally:
+            if metrics_server is not None:
+                metrics_server.shutdown()
             if app.state.media_archive is not None:
                 await app.state.media_archive.drain()  # finish background saves first
             await app.state.rate_limiter.aclose()
@@ -198,6 +208,7 @@ def create_app(
     )
     app.state.settings = settings
     app.state.started_at = time.monotonic()
+    metrics.build_info.labels(settings.app_version, settings.app_env).set(1)
     # Dependencies register readiness checks here as they are added (DB, Redis, LLM, storage).
     app.state.health_registry = HealthRegistry(
         timeout_seconds=settings.health_check_timeout_seconds,
@@ -261,10 +272,12 @@ def create_app(
         expose_headers=[REQUEST_ID_HEADER, RESPONSE_TIME_HEADER],
         max_age=600,
     )
-    app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(RequestContextMiddleware, gcp_project_id=settings.gcp_project_id)
 
     app.include_router(health.router)
     app.include_router(api_router, prefix=settings.api_v1_prefix)
+    if not settings.is_deployed:
+        app.include_router(metrics_routes.router)  # deployed: METRICS_PORT on loopback only
     if settings.enable_dev_ui and not settings.is_production:
         app.include_router(dev.router)
 

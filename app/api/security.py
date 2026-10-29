@@ -96,9 +96,14 @@ async def ai_rate_limit(request: Request, principal: PrincipalDep) -> None:
     await enforce(
         _limiter(request),
         [
-            Limit(f"user:{subject}", settings.rate_limit_per_minute, 60),
-            Limit(f"user:{subject}", settings.rate_limit_per_day, 86400),
-            Limit(f"client:{principal.client_id}", settings.rate_limit_client_per_minute, 60),
+            Limit(f"user:{subject}", settings.rate_limit_per_minute, 60, "user_minute"),
+            Limit(f"user:{subject}", settings.rate_limit_per_day, 86400, "user_day"),
+            Limit(
+                f"client:{principal.client_id}",
+                settings.rate_limit_client_per_minute,
+                60,
+                "client_minute",
+            ),
         ],
     )
 
@@ -108,5 +113,12 @@ async def feedback_rate_limit(request: Request, principal: PrincipalDep) -> None
     subject = _subject(request, principal)
     await enforce(
         _limiter(request),
-        [Limit(f"feedback:{subject}", settings.rate_limit_feedback_per_minute, 60)],
+        [
+            Limit(
+                f"feedback:{subject}",
+                settings.rate_limit_feedback_per_minute,
+                60,
+                "feedback_minute",
+            )
+        ],
     )

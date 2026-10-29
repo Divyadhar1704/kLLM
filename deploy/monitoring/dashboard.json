@@ -1,0 +1,106 @@
+{
+  "displayName": "KrishiMitra API",
+  "mosaicLayout": {
+    "columns": 48,
+    "tiles": [
+      {
+        "xPos": 0, "yPos": 0, "width": 24, "height": 16,
+        "widget": {
+          "title": "Requests per second by status (API)",
+          "xyChart": {
+            "dataSets": [{
+              "plotType": "STACKED_AREA",
+              "timeSeriesQuery": {"prometheusQuery": "sum by (status) (rate(krishimitra_http_requests_total{route=~\"/api/.*\"}[5m]))"}
+            }]
+          }
+        }
+      },
+      {
+        "xPos": 24, "yPos": 0, "width": 24, "height": 16,
+        "widget": {
+          "title": "Answer time p50 / p95 (s), text chat",
+          "xyChart": {
+            "dataSets": [
+              {"plotType": "LINE", "legendTemplate": "p50", "timeSeriesQuery": {"prometheusQuery": "histogram_quantile(0.5, sum by (le) (rate(krishimitra_http_request_duration_seconds_bucket{route=~\"/api/v1/chat(/stream)?\"}[5m])))"}},
+              {"plotType": "LINE", "legendTemplate": "p95", "timeSeriesQuery": {"prometheusQuery": "histogram_quantile(0.95, sum by (le) (rate(krishimitra_http_request_duration_seconds_bucket{route=~\"/api/v1/chat(/stream)?\"}[5m])))"}}
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 0, "yPos": 16, "width": 24, "height": 16,
+        "widget": {
+          "title": "AI calls by outcome",
+          "xyChart": {
+            "dataSets": [{
+              "plotType": "STACKED_BAR",
+              "timeSeriesQuery": {"prometheusQuery": "sum by (purpose, outcome) (increase(krishimitra_llm_calls_total[10m]))"}
+            }]
+          }
+        }
+      },
+      {
+        "xPos": 24, "yPos": 16, "width": 24, "height": 16,
+        "widget": {
+          "title": "AI tokens per hour, and estimated cost per day (USD)",
+          "xyChart": {
+            "dataSets": [
+              {"plotType": "STACKED_BAR", "timeSeriesQuery": {"prometheusQuery": "sum by (purpose, kind) (increase(krishimitra_llm_tokens_total[1h]))"}},
+              {"plotType": "LINE", "targetAxis": "Y2", "legendTemplate": "cost USD / 24 h", "timeSeriesQuery": {"prometheusQuery": "sum(increase(krishimitra_llm_cost_usd_total[24h]))"}}
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 0, "yPos": 32, "width": 24, "height": 16,
+        "widget": {
+          "title": "Answers by language and kind (per hour)",
+          "xyChart": {
+            "dataSets": [{
+              "plotType": "STACKED_BAR",
+              "timeSeriesQuery": {"prometheusQuery": "sum by (language, kind) (increase(krishimitra_answers_total[1h]))"}
+            }]
+          }
+        }
+      },
+      {
+        "xPos": 24, "yPos": 32, "width": 24, "height": 16,
+        "widget": {
+          "title": "Quality: grounded share, cache hit rate",
+          "xyChart": {
+            "dataSets": [
+              {"plotType": "LINE", "legendTemplate": "grounded in documents", "timeSeriesQuery": {"prometheusQuery": "sum(increase(krishimitra_answers_total{grounded=\"true\"}[1h])) / clamp_min(sum(increase(krishimitra_answers_total[1h])), 1)"}},
+              {"plotType": "LINE", "legendTemplate": "answer cache hits", "timeSeriesQuery": {"prometheusQuery": "sum(increase(krishimitra_answer_cache_total{result=\"hit\"}[1h])) / clamp_min(sum(increase(krishimitra_answer_cache_total[1h])), 1)"}}
+            ]
+          }
+        }
+      },
+      {
+        "xPos": 0, "yPos": 48, "width": 24, "height": 16,
+        "widget": {
+          "title": "Photo / video diagnoses by result (per hour)",
+          "xyChart": {
+            "dataSets": [{
+              "plotType": "STACKED_BAR",
+              "timeSeriesQuery": {"prometheusQuery": "sum by (source, status) (increase(krishimitra_diagnoses_total[1h]))"}
+            }]
+          }
+        }
+      },
+      {
+        "xPos": 24, "yPos": 48, "width": 24, "height": 16,
+        "widget": {
+          "title": "Feedback, safety warnings, language retries, rate limits (per hour)",
+          "xyChart": {
+            "dataSets": [
+              {"plotType": "LINE", "legendTemplate": "feedback {{rating}}", "timeSeriesQuery": {"prometheusQuery": "sum by (rating) (increase(krishimitra_feedback_total[1h]))"}},
+              {"plotType": "LINE", "legendTemplate": "safety warnings", "timeSeriesQuery": {"prometheusQuery": "sum(increase(krishimitra_safety_warnings_total[1h]))"}},
+              {"plotType": "LINE", "legendTemplate": "language retries", "timeSeriesQuery": {"prometheusQuery": "sum(increase(krishimitra_language_retries_total[1h]))"}},
+              {"plotType": "LINE", "legendTemplate": "rate limited", "timeSeriesQuery": {"prometheusQuery": "sum(increase(krishimitra_rate_limited_total[1h]))"}}
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

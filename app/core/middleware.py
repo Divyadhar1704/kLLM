@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.core import metrics
 from app.core.errors import INTERNAL_ERROR_MESSAGE, REQUEST_ID_HEADER, error_payload
 from app.core.logging import get_logger
 
@@ -52,9 +53,54 @@ def _scope_request_id(scope: Scope) -> str | None:
     return None
 
 
+def _trace_context(scope: Scope, project_id: str | None) -> dict[str, str]:
+    """Cloud Logging fields grouping all log lines of one request under its Cloud Trace id
+    (from Google's load balancer: X-Cloud-Trace-Context "TRACE/SPAN;o=1", or W3C traceparent)."""
+    if not project_id:
+        return {}
+    headers = dict(scope.get("headers", []))
+    trace_id = span_id = None
+    sampled = False
+    if cloud := headers.get(b"x-cloud-trace-context"):
+        match = _CLOUD_TRACE.match(cloud.decode("latin-1"))
+        if match:
+            trace_id, span_id, sampled = match.group(1), match.group(2), match.group(3) == "1"
+    elif parent := headers.get(b"traceparent"):
+        match = _TRACEPARENT.match(parent.decode("latin-1"))
+        if match:
+            trace_id, span_id = match.group(1), match.group(2)
+            sampled = int(match.group(3), 16) & 1 == 1
+    if trace_id is None:
+        return {}
+    context = {
+        "logging.googleapis.com/trace": f"projects/{project_id}/traces/{trace_id}",
+        "logging.googleapis.com/trace_sampled": sampled,
+    }
+    if span_id:
+        context["logging.googleapis.com/spanId"] = span_id
+    return context  # type: ignore[return-value]
+
+
+def _route_template(scope: Scope) -> str:
+    """ "/api/v1/items/{item_id}" for a matched route, "unmatched" otherwise. Built from the real
+    path with the path parameters put back as placeholders: with routers included lazily, the
+    route object only knows its path inside its own router (without the /api/v1 prefix)."""
+    if scope.get("route") is None:
+        return "unmatched"
+    path: str = scope.get("path", "")
+    for name, value in (scope.get("path_params") or {}).items():
+        path = path.replace(f"/{value}", f"/{{{name}}}", 1)
+    return path
+
+
+_CLOUD_TRACE = re.compile(r"^([0-9a-f]{32})(?:/(\d+))?(?:;o=([01]))?", re.IGNORECASE)
+_TRACEPARENT = re.compile(r"^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$", re.IGNORECASE)
+
+
 class RequestContextMiddleware:
-    def __init__(self, app: ASGIApp) -> None:
+    def __init__(self, app: ASGIApp, *, gcp_project_id: str | None = None) -> None:
         self.app = app
+        self.gcp_project_id = gcp_project_id
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -75,7 +121,8 @@ class RequestContextMiddleware:
                 headers[RESPONSE_TIME_HEADER] = f"{(time.perf_counter() - start) * 1000:.1f}"
             await send(message)
 
-        with structlog.contextvars.bound_contextvars(request_id=request_id):
+        trace = _trace_context(scope, self.gcp_project_id)
+        with structlog.contextvars.bound_contextvars(request_id=request_id, **trace):
             failed = False
             try:
                 await self.app(scope, receive, send_wrapper)
@@ -100,6 +147,12 @@ class RequestContextMiddleware:
             log = logger.debug
         else:
             log = logger.info
+
+        # Route template ("/api/v1/chat"), never the raw path: unknown paths would otherwise
+        # create a new metric series each.
+        route = _route_template(scope)
+        metrics.http_requests.labels(scope.get("method", ""), route, str(status)).inc()
+        metrics.http_duration.labels(route).observe(duration_ms / 1000)
 
         # Who called (audit): set by app.api.security once the caller is identified. The
         # farmer id is logged only as a hash.

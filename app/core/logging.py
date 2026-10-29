@@ -13,6 +13,7 @@ import contextlib
 import io
 import logging
 import sys
+import traceback
 from collections.abc import Mapping
 from typing import Any
 
@@ -84,6 +85,33 @@ def add_severity(_: WrappedLogger, __: str, event_dict: EventDict) -> EventDict:
     return event_dict
 
 
+_ERROR_EVENT_TYPE = (
+    "type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent"
+)
+
+
+def error_reporting(service: str, version: str) -> Processor:
+    """Marks ERROR logs that carry an exception for Cloud Error Reporting (groups new errors and
+    can alert on them): the event type, the service, and the stack trace as text."""
+
+    def processor(_: WrappedLogger, __: str, event_dict: EventDict) -> EventDict:
+        exc_info = event_dict.get("exc_info")
+        if not exc_info or event_dict.get("level") not in ("error", "critical"):
+            return event_dict
+        if isinstance(exc_info, BaseException):
+            exc_info = (type(exc_info), exc_info, exc_info.__traceback__)
+        elif not isinstance(exc_info, tuple):
+            exc_info = sys.exc_info()
+        if exc_info[0] is None:
+            return event_dict
+        event_dict["@type"] = _ERROR_EVENT_TYPE
+        event_dict["serviceContext"] = {"service": service, "version": version}
+        event_dict["stack_trace"] = "".join(traceback.format_exception(*exc_info))
+        return event_dict
+
+    return processor
+
+
 def _ensure_utf8_stdout() -> None:
     # Telugu/Kannada/Hindi text must not crash logging on Windows consoles or redirected output.
     stream = sys.stdout
@@ -109,6 +137,7 @@ def setup_logging(settings: Settings) -> None:
     if settings.log_json:
         shared_processors.append(add_severity)
         final_processors += [
+            error_reporting("krishimitra-api", settings.app_version),  # before exc_info is used
             structlog.processors.dict_tracebacks,
             structlog.processors.JSONRenderer(ensure_ascii=False),
         ]

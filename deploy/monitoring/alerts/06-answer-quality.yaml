@@ -1,0 +1,26 @@
+displayName: "KrishiMitra: answers not grounded or rated badly"
+severity: WARNING
+combiner: OR
+conditions:
+  - displayName: "Document search failing (more than 5 in 15 min)"
+    conditionPrometheusQueryLanguage:
+      query: |
+        sum(increase(krishimitra_retrieval_errors_total[15m])) > 5
+      duration: 0s
+      evaluationInterval: 60s
+  - displayName: "More than 30% thumbs-down over 24 h (at least 20 ratings)"
+    conditionPrometheusQueryLanguage:
+      query: |
+        (sum(increase(krishimitra_feedback_total{rating="down"}[24h]))
+          / clamp_min(sum(increase(krishimitra_feedback_total[24h])), 1) > 0.3)
+        and on() (sum(increase(krishimitra_feedback_total[24h])) >= 20)
+      duration: 0s
+      evaluationInterval: 900s
+alertStrategy:
+  autoClose: 86400s
+documentation:
+  mimeType: text/markdown
+  content: |
+    Farmers get answers without official sources, or rate answers badly.
+    Search errors: database / embedding API (`retrieval_failed` logs).
+    Thumbs-down: read the comments with `python -m scripts.usage_report --days 1`.

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.api.deps import RequiredConversationsDep
 from app.api.security import PrincipalDep
+from app.core import metrics
 from app.schemas.chat import ConversationId
 from app.schemas.errors import ErrorResponse
 
@@ -54,13 +55,14 @@ class FeedbackResponse(BaseModel):
 async def save_feedback(
     body: FeedbackRequest, conversations: RequiredConversationsDep, principal: PrincipalDep
 ) -> FeedbackResponse:
-    feedback_id = await conversations.save_feedback(
+    feedback_id = await conversations.save_feedback(  # NotFoundError: not counted below
         owner=principal.owner,
         conversation_id=body.conversation_id,
         message_id=body.message_id,
         rating=body.rating,
         comment=body.comment.strip() if body.comment else None,
     )
+    metrics.feedback.labels(body.rating).inc()
     return FeedbackResponse(
         id=feedback_id,
         message_id=body.message_id,
